@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# replace the environment 'python' with 'python3' due to ubuntu's default setting
 
 import re
 from gradelib import *
