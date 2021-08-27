@@ -105,3 +105,11 @@ uint64 sys_trace(void){
   myproc()->trace_mask = n; // set the mask to enable tracing
   return 0;
 }
+
+uint64 sys_sysinfo(void){
+  uint64 sysinfo_addr; // The system call takes one argument: a pointer to a struct sysinfo
+  if(argaddr(0, &sysinfo_addr) < 0){
+    return -1;
+  }
+  return get_sysinfo(sysinfo_addr);
+}

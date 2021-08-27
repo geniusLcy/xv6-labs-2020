@@ -80,3 +80,19 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+
+// Count the number of bytes of free memory.
+// Return the number of bytes of free memory.
+// Return 0 if there is no free memory left.
+uint64 cnt_freemem(void){
+  uint64 total_freemem = 0; // free memory count, default to 0
+  struct run *r;
+
+  acquire(&kmem.lock);
+  for(r = kmem.freelist; r; r = r->next){ // search the whole freelist
+    total_freemem = total_freemem + PGSIZE; // one 4096-byte page of physical memory for each node
+  }
+  release(&kmem.lock);
+
+  return total_freemem;
+}
