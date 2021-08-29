@@ -122,6 +122,9 @@ found:
     release(&p->lock);
     return 0;
   }
+  // user process can use memory at 0 to PLIC
+  // after boot, we need to unmap CLINT to ensure access
+  uvmunmap(p->k_pagetable, CLINT, 0x10000 / PGSIZE, 0);
 
   // This part was moved from procinit.
   // Allocate a page for the process's kernel stack.
@@ -257,6 +260,12 @@ userinit(void)
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
 
+  // Don't forget that to include the first process's user page 
+  // table in its kernel page table in userinit.
+  if(uvm2kvm_map(p->pagetable, p->k_pagetable, 0, PGSIZE) < 0){
+    panic("uvm2kvm mapping error!\n");
+  }
+
   p->state = RUNNABLE;
 
   release(&p->lock);
@@ -267,16 +276,23 @@ userinit(void)
 int
 growproc(int n)
 {
-  uint sz;
+  uint sz, old_sz, new_sz;
   struct proc *p = myproc();
 
   sz = p->sz;
+  old_sz = PGROUNDUP(sz); // align
+  new_sz = PGROUNDUP(sz + n); // align
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    if(uvm2kvm_map(p->pagetable, p->k_pagetable, old_sz, new_sz) < 0){
+      panic("uvm2kvm mapping error!\n");
+    }
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    // unmap the original user pagetable in kernel pagetable
+    uvmunmap(p->k_pagetable, new_sz, (old_sz - new_sz) / PGSIZE, 0);
   }
   p->sz = sz;
   return 0;
@@ -323,6 +339,13 @@ fork(void)
   pid = np->pid;
 
   np->state = RUNNABLE;
+
+  // map user pagetable to kernel pagetable
+  if(uvm2kvm_map(np->pagetable, np->k_pagetable, 0, np->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    panic("uvm2kvm mapping error!\n");
+  }
 
   release(&np->lock);
 

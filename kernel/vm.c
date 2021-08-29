@@ -8,6 +8,9 @@
 #include "spinlock.h"
 #include "proc.h"
 
+#define NEW_COPYIN
+#define U2K_VER 1
+
 /*
  * the kernel's page table.
  */
@@ -412,6 +415,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
+#ifndef NEW_COPYIN
   uint64 n, va0, pa0;
 
   while(len > 0){
@@ -429,6 +433,9 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     srcva = va0 + PGSIZE;
   }
   return 0;
+#else
+  return copyin_new(pagetable, dst, srcva, len);
+#endif
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -438,6 +445,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
+#ifndef NEW_COPYIN
   uint64 n, va0, pa0;
   int got_null = 0;
 
@@ -472,6 +480,9 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+#else
+  return copyinstr_new(pagetable, dst, srcva, max);
+#endif
 }
 
 // a helper function for vmprint: print the indicator
@@ -517,4 +528,62 @@ void vmprint_helper(pagetable_t pagetable, int current_depth){
 void vmprint(pagetable_t pagetable){
   printf("page table %p\n", pagetable);
   vmprint_helper(pagetable, 1);
+}
+
+// map the process' user pagetable over kernel pagetable
+// return 0 if success, -1 if fail
+int uvm2kvm_map(pagetable_t u_pagetable, pagetable_t k_pagetable, uint64 old_sz, uint64 new_sz){
+#if U2K_VER == 0
+  if((old_sz > new_sz) || (PGROUNDUP(new_sz) >= PLIC)){
+    // prevent user processes from growing larger than the PLIC address
+    return -1;
+  }
+
+  uint64 virtual_addr;
+  pte_t *pte_user, *pte_kernel;
+
+  for(virtual_addr = PGROUNDUP(old_sz); virtual_addr < new_sz; virtual_addr += PGSIZE){
+    pte_user = walk(u_pagetable, virtual_addr, 0); // read from user pagetable
+    if(pte_user == 0){
+      panic("uvm2kvm_map: can read pte.\n");
+    }
+    pte_kernel = walk(k_pagetable, virtual_addr, 1); // write to kernel pagetable
+    if(pte_kernel == 0){
+      panic("uvm2kvm_map: alloc pte failed.\n");
+    }
+    // map user pgtb to kernel pgtb
+    *pte_kernel = (*pte_user) | (PTE_FLAGS(*pte_user) & (~PTE_U)); // A page with PTE_U set cannot be accessed in kernel mode
+  }
+
+  return 0;
+#elif U2K_VER == 1
+  if(new_sz > PLIC){
+    // prevent user processes from growing larger than the PLIC address
+    return -1;
+  }
+
+  pte_t *pte;
+  uint64 v_addr, pa;
+  uint flag;
+
+  for(v_addr = PGROUNDUP(old_sz); v_addr < new_sz; v_addr += PGSIZE){
+    pte = walk(u_pagetable, v_addr, 0);
+    if(pte == 0){
+      panic("uvm2kvm_map: can read pte.\n");
+    }
+    if((*pte & PTE_V) == 0){
+      panic("uvm2kvm_map: page not valid.\n");
+    }
+    pa = PTE2PA(*pte);
+    flag = PTE_FLAGS(*pte) & (~PTE_U);
+    if(mappages(k_pagetable, v_addr, PGSIZE, pa, flag) != 0){
+      // map failed, unmap the original 
+      uvmunmap(k_pagetable, 0, v_addr / PGSIZE, 0);
+      return -1;
+    }
+  }
+
+  return 0;
+
+#endif
 }
