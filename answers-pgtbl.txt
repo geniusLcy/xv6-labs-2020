@@ -1,0 +1,8 @@
+P: What does page 0 contain?
+A: .text .data
+
+P: What is in page 2?
+A: the process' stack
+
+P: When running in user mode, could the process read/write the memory mapped by page 1?
+A: No, page 1 is an invalid guard page which xv6 places right below the stack. If the user stack overflows and the process tries to use an address below the stack, the hardware will generate a page-fault exception because the mapping is not valid.

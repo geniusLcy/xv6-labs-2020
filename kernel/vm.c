@@ -440,3 +440,48 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+// a helper function for vmprint: print the indicator
+void vmprint_indicator_printer(int depth){
+  // first print the indicator ..
+  switch (depth){
+  case 1:
+    printf("..");
+    break;
+  case 2:
+    printf(".. ..");
+    break;
+  case 3:
+    printf(".. .. ..");
+    break;
+  default:
+    printf("vmprint: error, exceed max depth!\n");
+    exit(-1);
+    break;
+  }
+}
+
+// a helper function to recursively print the whole page table
+void vmprint_helper(pagetable_t pagetable, int current_depth){
+
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      vmprint_indicator_printer(current_depth);
+      printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+      vmprint_helper((pagetable_t)child, current_depth + 1);
+    } else if(pte & PTE_V){
+      vmprint_indicator_printer(current_depth);
+      printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+    }
+  }
+}
+
+// prints the contents of a page table
+void vmprint(pagetable_t pagetable){
+  printf("page table %p\n", pagetable);
+  vmprint_helper(pagetable, 1);
+}
