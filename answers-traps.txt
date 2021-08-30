@@ -1,0 +1,43 @@
+P: Which registers contain arguments to functions? For example, which register holds 13 in main's call to printf?
+A: - a0 holds the first argument, a1 holds the second argument, etc.
+   - a2 holds 13.
+=======================================
+P: Where is the call to function f in the assembly code for main? Where is the call to g? (Hint: the compiler may inline functions.)
+A: There is no call to function f and g, `li	a1,12` directly caculate the value = 12.
+=======================================
+P: At what address is the function printf located?
+A: - `auipc	ra,0x0` add 0x0 + pc to ra, so ra = 0x30
+   - `jalr	1528(ra)` jump to ra + 1528, so address of printf is 0x628.
+=======================================
+P: What value is in the register ra just after the jalr to printf in main?
+A: 0x30
+=======================================
+P: Run the following code.
+
+	unsigned int i = 0x00646c72;
+	printf("H%x Wo%s", 57616, &i);
+      
+What is the output? The output depends on that fact that the RISC-V is little-endian. If the RISC-V were instead big-endian what would you set i to in order to yield the same output? Would you need to change 57616 to a different value?
+A: 
+Hex     Chr
+-----------
+0x72    r
+0x6c    l
+0x64    d
+-----------
+
+0d57616 -> 0xe110
+
+output: He110 World
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+big-endian:
+i = 0x726c64
+no nedd to change 57616
+====================================
+P:
+In the following code, what is going to be printed after 'y='? (note: the answer is not a specific value.) Why does this happen?
+
+	printf("x=%d y=%d", 3);
+
+A: undefined value, called printf function but only set the first argument,
+   rv take a0 as the first argument, a1 as the second, the output depends on a2 value.
