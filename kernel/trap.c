@@ -68,10 +68,13 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else if((r_scause() == 13) || (r_scause() == 15)){
-    printf("get a page fault!\n"); // print msg
+    // printf("get a page fault!\n"); // print msg for debugging, comment it when test
+  
     // check whether a fault is a page fault by seeing
     // if r_scause() is 13 or 15 in usertrap()
     if(lazy_alloc(r_stval()) < 0){
+      // Handle out-of-memory correctly: if kalloc() fails 
+      //in the page fault handler, kill the current process
       p->killed = 1;
     }
   }  else {

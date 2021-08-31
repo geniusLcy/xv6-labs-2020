@@ -103,10 +103,17 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
 
   pte = walk(pagetable, va, 0);
-  if(pte == 0)
-    return 0;
-  if((*pte & PTE_V) == 0)
-    return 0;
+  // read or write syscall will finally invoke walkaddr
+  // but donot get a page fault, when enable lazy allocation,
+  // we should invoke lazy_alloc() to alloc mem and map page
+  // instead of directly return, then invoke walk() we can
+  // find the right pagetable and get the right address 
+  if((pte == 0) || ((*pte & PTE_V) == 0)){
+    if(lazy_alloc(va) < 0){
+      return 0;
+    }
+    pte = walk(pagetable, va, 0);
+  }
   if((*pte & PTE_U) == 0)
     return 0;
   pa = PTE2PA(*pte);
@@ -182,14 +189,19 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0)
+    if((pte = walk(pagetable, a, 0)) == 0){
+      // if enable lazy allocation, comment it to avoid panic
+      // panic("uvmunmap: walk");
+      continue;
+    }
+    if((*pte & PTE_V) == 0){
       // if enable lazy allocation, comment it to avoid panic
       // panic("uvmunmap: not mapped");
-    if(PTE_FLAGS(*pte) == PTE_V)
-      // if enable lazy allocation, comment it to avoid panic
-      // panic("uvmunmap: not a leaf");
+      continue;
+    }
+    if(PTE_FLAGS(*pte) == PTE_V){
+      panic("uvmunmap: not a leaf");
+    }
     if(do_free){
       uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
@@ -318,10 +330,15 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
-    if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+    if((pte = walk(old, i, 0)) == 0){
+      // panic("uvmcopy: pte should exist");
+      continue;
+    }
+    if((*pte & PTE_V) == 0){
+      // if enable lazy allocation, comment it to avoid panic
+      // panic("uvmcopy: page not present");
+      continue;
+    }
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -446,31 +463,34 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 }
 
 // lazy allocation function
-// Return the address if success
+// Return 0 if success
 // Return -1 if fail
-uint64 lazy_alloc(uint64 address){
+int lazy_alloc(uint64 address){
   struct proc *p = myproc();
 
   // check address valid
-  if((address > p->sz) || (address < p->trapframe->sp)){
-    printf("lazy_alloc: invalid address\n");
+  // Kill a process if it page-faults on a virtual memory
+  // address higher than any allocated with sbrk().
+  if((address >= p->sz) || (address < p->trapframe->sp)){
+    // Handle faults on the invalid page below the user stack
+    // printf("lazy_alloc: invalid address\n"); // print err msg, comment it when test
     return -1;
   }
 
   // alloc memory
   char* mem = kalloc();
   if(mem == 0){
-    printf("lazy_alloc: alloc memory faild\n");
+    // printf("lazy_alloc: alloc memory faild\n"); // print err msg, comment it when test
     return -1;
   }
   // set mem
-  memset((void*)mem, 0, PGSIZE);
+  memset(mem, 0, PGSIZE);
   // map mem
   if(mappages(p->pagetable, PGROUNDDOWN(address), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
     kfree(mem);
-    printf("lazy_alloc: map page failed\n");
+    // printf("lazy_alloc: map page failed\n"); // print err msg, comment it when test
     return -1;
   }
 
-  return (uint64)mem;
+  return 0;
 }

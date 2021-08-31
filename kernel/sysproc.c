@@ -43,14 +43,16 @@ sys_sbrk(void)
 {
   int addr;
   int n;
+  struct proc *p = myproc();
 
   if(argint(0, &n) < 0)
     return -1;
-  addr = myproc()->sz;
-  myproc()->sz = addr + n;
+  addr = p->sz;
+  p->sz = addr + n;
   // remove the call of growproc
   if(n < 0){ // manually implement dealloc part
-    myproc()->sz = uvmdealloc(myproc()->pagetable, addr, addr + n);
+    // Handle negative sbrk() arguments
+    p->sz = uvmdealloc(p->pagetable, addr, addr + n);
   }
   return addr;
 }
