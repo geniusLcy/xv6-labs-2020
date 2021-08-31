@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -183,9 +185,11 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+      // if enable lazy allocation, comment it to avoid panic
+      // panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
-      panic("uvmunmap: not a leaf");
+      // if enable lazy allocation, comment it to avoid panic
+      // panic("uvmunmap: not a leaf");
     if(do_free){
       uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
@@ -439,4 +443,34 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+// lazy allocation function
+// Return the address if success
+// Return -1 if fail
+uint64 lazy_alloc(uint64 address){
+  struct proc *p = myproc();
+
+  // check address valid
+  if((address > p->sz) || (address < p->trapframe->sp)){
+    printf("lazy_alloc: invalid address\n");
+    return -1;
+  }
+
+  // alloc memory
+  char* mem = kalloc();
+  if(mem == 0){
+    printf("lazy_alloc: alloc memory faild\n");
+    return -1;
+  }
+  // set mem
+  memset((void*)mem, 0, PGSIZE);
+  // map mem
+  if(mappages(p->pagetable, PGROUNDDOWN(address), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+    kfree(mem);
+    printf("lazy_alloc: map page failed\n");
+    return -1;
+  }
+
+  return (uint64)mem;
 }
