@@ -107,4 +107,5 @@ struct proc {
   int alarm_cnt;               // how many ticks have passed since the last call
   int alarm_interval;          // the alarm interval
   uint64 alarm_handler;        // the pointer to the handler function
+  struct trapframe *save_trapframe; // save reg to return properly
 };

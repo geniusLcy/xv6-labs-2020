@@ -131,6 +131,11 @@ found:
   p->alarm_cnt = 0;
   p->alarm_interval = 0;
   p->alarm_handler = 0;
+  // for saving the memory, when alloc the process
+  // donnot allocate a trapframe page for alarm save
+  // only allocate it when trap
+  p->save_trapframe = 0;
+  
 
   return p;
 }
@@ -144,6 +149,11 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+  // deal with unexpected case that sys_sigreturn
+  // failed to free save_trapframe
+  if(p->save_trapframe)
+    kfree((void*)p->save_trapframe);
+  p->save_trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;

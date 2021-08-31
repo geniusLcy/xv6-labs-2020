@@ -84,8 +84,26 @@ usertrap(void)
       if(p->alarm_cnt == p->alarm_interval){ // cnt hit interval
         // clear cnt
         p->alarm_cnt = 0;
-        // jump to run handler function
-        p->trapframe->epc = p->alarm_handler;
+
+        // Prevent re-entrant calls to the handler
+        // if a handler hasn't returned yet, 
+        // the kernel shouldn't call it again.
+        if(p->save_trapframe == 0){
+          // when save_trapframe eq 0, last func hasn't call sigreturn
+          // which means it's not end
+
+          // alloc
+          if((p->save_trapframe = (struct trapframe *)kalloc()) == 0){
+            printf("error allocating trapframe to save\n");
+            exit(-1);
+          }
+
+          // save current reg to save_trapframe
+          memmove(p->save_trapframe, p->trapframe, sizeof(struct trapframe));
+
+          // jump to run handler function
+          p->trapframe->epc = p->alarm_handler;
+        }
       }
     }
     yield();

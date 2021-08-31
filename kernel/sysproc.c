@@ -101,7 +101,7 @@ uint64 sys_sigalarm(void){
   int interval;
   uint64 handler;
   struct proc *p = myproc();
-  
+
   if(argint(0, &interval) < 0){
     return -1;
   }
@@ -116,5 +116,17 @@ uint64 sys_sigalarm(void){
 }
 
 uint64 sys_sigreturn(void){
+  struct proc *p = myproc();
+  if(p->save_trapframe == 0){
+    // unexpected error occurs, cannot recover from save_trapframe
+    printf("unexpected error occurs, cannot recover from save_trapframe\n");
+    return -1;
+  }
+  // recover the registers from save_trapframe
+  memmove(p->trapframe, p->save_trapframe, sizeof(struct trapframe));
+  // free save_trapframe
+  kfree((void*)p->save_trapframe);
+  p->save_trapframe = 0;
+
   return 0;
 }
