@@ -89,7 +89,7 @@ usertrap(void)
         // if a handler hasn't returned yet, 
         // the kernel shouldn't call it again.
         if(p->save_trapframe == 0){
-          // when save_trapframe eq 0, last func hasn't call sigreturn
+          // when save_trapframe neq 0, last func hasn't call sigreturn
           // which means it's not end
 
           // alloc
