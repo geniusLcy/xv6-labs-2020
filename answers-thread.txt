@@ -1,3 +1,7 @@
 P: thread_switch needs to save/restore only the callee-save registers. Why?
 
-A: caller-saved registers are saved on the stack (if needed) by the calling C code. 
+A: caller-saved registers are saved on the stack (if needed) by the calling C code.
+
+P: Why are there missing keys with 2 threads, but not with 1 thread? 
+
+A: functions donot consider multithread's ramdon seq 
