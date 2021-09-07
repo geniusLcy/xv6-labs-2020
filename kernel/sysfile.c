@@ -16,6 +16,8 @@
 #include "file.h"
 #include "fcntl.h"
 
+#define MAX_TTL 10
+
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
@@ -322,6 +324,30 @@ sys_open(void)
     return -1;
   }
 
+  if(ip->type == T_SYMLINK){
+    if(!(omode & O_NOFOLLOW)){
+      int time_to_live = MAX_TTL;
+      char target[MAXPATH];
+      while(ip->type == T_SYMLINK){
+        if(time_to_live == 0){ // reach MAX_TTL, means circle
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+        time_to_live--;
+        memset(target, 0, sizeof(target));
+        readi(ip, 0, (uint64)target, 0, MAXPATH);
+        iunlockput(ip);
+        if((ip = namei(target)) == 0){ // target not exist
+          end_op();
+          return -1;
+        }
+        ilock(ip);
+      }
+    }
+  }
+
+
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
       fileclose(f);
@@ -482,5 +508,32 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64
+sys_symlink(void)
+{
+  char target_path[MAXPATH];
+  memset(target_path, 0, sizeof(target_path));
+  char c_path[MAXPATH];
+  if(argstr(0, target_path, MAXPATH) < 0 || argstr(1, c_path, MAXPATH) < 0){
+    return -1;
+  }
+
+  struct inode *ip;
+
+  begin_op();
+  if((ip = create(c_path, T_SYMLINK, 0, 0)) == 0){
+    end_op();
+    return -1;
+  }
+
+  if(writei(ip, 0, (uint64)target_path, 0, MAXPATH) != MAXPATH){
+    return -1;
+  }
+
+  iunlockput(ip);
+  end_op();
   return 0;
 }
