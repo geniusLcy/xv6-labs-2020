@@ -10,6 +10,8 @@ struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
+struct vma vma_table[NVMA];
+
 struct proc *initproc;
 
 int nextpid = 1;
@@ -302,6 +304,31 @@ fork(void)
 
   np->state = RUNNABLE;
 
+  np->vma = 0;
+  struct vma *parent_vma = p->vma;
+  struct vma *pre = 0;
+  while(parent_vma){
+    struct vma *vma = vma_alloc();
+    vma->start = parent_vma->start;
+    vma->end = parent_vma->end;
+    vma->offset = parent_vma->offset;
+    vma->length = parent_vma->length;
+    vma->prot = parent_vma->prot;
+    vma->flags = parent_vma->flags;
+    vma->fd = parent_vma->fd;
+    filedup(vma->fd);
+    vma->next = 0;
+    if(pre == 0){
+      np->vma = vma;
+    }else{
+      pre->next = vma;
+    }
+    pre = vma;
+    release(&vma->lock);
+    parent_vma = parent_vma->next;
+  }
+
+
   release(&np->lock);
 
   return pid;
@@ -343,6 +370,21 @@ exit(int status)
 
   if(p == initproc)
     panic("init exiting");
+
+  // munmap all mmap vma
+  struct vma* v = p->vma;
+  struct vma* pv;
+  while(v){
+    write_back(v, v->start, v->length);
+    uvmunmap(p->pagetable, v->start, PGROUNDUP(v->length) / PGSIZE, 1);
+    fileclose(v->fd);
+    pv = v->next;
+    acquire(&v->lock);
+    v->next = 0;
+    v->length = 0;
+    release(&v->lock);
+    v = pv;
+  }
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
@@ -700,4 +742,16 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+struct vma* vma_alloc(){
+  for(int i = 0; i < NVMA; i++){
+    acquire(&vma_table[i].lock);
+    if(vma_table[i].length == 0){
+      return &vma_table[i];
+    }else{
+      release(&vma_table[i].lock);
+    }
+  }
+  panic("no enough vma");
 }

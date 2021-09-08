@@ -484,3 +484,126 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_mmap(void)
+{
+  uint64 addr;
+  int length, prot, flags, fd, offset;
+  if((argaddr(0, &addr) < 0) ||
+      (argint(1, &length) < 0) ||
+      (argint(2, &prot) < 0) ||
+      (argint(3, &flags) < 0) ||
+      (argint(4, &fd) < 0) ||
+      (argint(5, &offset) < 0)){
+    return -1;
+  }
+
+  if(addr != 0){
+    panic("mmap: invalid address");
+  }
+  if(offset != 0){
+    panic("mmap: invalid offest");
+  }
+
+  struct proc *p = myproc();
+  struct file* f = p->ofile[fd];
+
+  int pte_flag = PTE_U;
+  if (prot & PROT_WRITE) {
+    if(!f->writable && !(flags & MAP_PRIVATE)){
+      printf("mmap: unwritable\n");
+      return -1;
+    }
+    pte_flag |= PTE_W;
+  }
+  if (prot & PROT_READ) {
+    if(!f->readable) {
+      printf("mmap: unreadable\n");
+      return -1;
+    }
+    pte_flag |= PTE_R;
+  }
+
+  struct vma* vma = vma_alloc();
+  vma->prot = pte_flag;
+  vma->length = length;
+  vma->offset = offset;
+  vma->fd = myproc()->ofile[fd];
+  vma->flags = flags;
+  filedup(f);
+  struct vma* proc_vma = p->vma;
+  if(proc_vma == 0){
+    vma->start = VMA_START;
+    vma->end = vma->start + length;
+    p->vma = vma;
+  }else{
+    while(proc_vma->next) proc_vma = proc_vma->next;
+    vma->start = PGROUNDUP(proc_vma->end);
+    vma->end = vma->start + length;
+    proc_vma->next = vma;
+    vma->next = 0;
+  }
+  addr = vma->start;
+
+  release(&vma->lock);
+  return addr;
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr;
+  int length;
+  if((argaddr(0, &addr) < 0) || (argint(1, &length) < 0)){
+    return -1;
+  }
+
+  struct proc *p = myproc();
+  struct vma *proc_vma = p->vma;
+  struct vma *previous_vma = 0;
+  while(proc_vma != 0){
+    if((addr >= proc_vma->start) && (addr < proc_vma->end)) {
+      // already found
+      break;
+    }
+    previous_vma = proc_vma;
+    proc_vma = proc_vma->next;
+  }
+
+  if(proc_vma == 0) {
+    printf("munmap: no map\n");
+    return -1;
+  }
+  if((addr != proc_vma->start) && (addr + length != proc_vma->end)) {
+    panic("munmap middle of vma");
+  }
+
+  if(addr == proc_vma->start){
+    write_back(proc_vma, addr, length);
+    uvmunmap(p->pagetable, addr, length / PGSIZE, 1);
+    if(length == proc_vma->length){
+      // free all
+      fileclose(proc_vma->fd);
+      if(previous_vma == 0){
+        p->vma = proc_vma->next; // head
+      }else{
+        previous_vma->next = proc_vma->next;
+        proc_vma->next = 0;
+      }
+      acquire(&proc_vma->lock);
+      proc_vma->length = 0;
+      release(&proc_vma->lock);
+    }else{
+      // free head
+      proc_vma->start -= length;
+      proc_vma->offset += length;
+      proc_vma->length -= length;
+    }
+  }else{
+    // free tail
+    proc_vma->length -= length;
+    proc_vma->end -= length;
+  }
+  return 0;
+}

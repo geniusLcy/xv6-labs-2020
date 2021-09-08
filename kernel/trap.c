@@ -65,7 +65,14 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } else if((r_scause() == 15) || (r_scause() == 13)){
+    // page fault
+    if(mmap_lazy_alloc(r_stval(), r_scause()) != 0){
+      printf("mmap_lazy_alloc: page fault\n");
+      p->killed = 1;
+    }
+  }
+  else if((which_dev = devintr()) != 0){
     // ok
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);

@@ -5,6 +5,11 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "file.h"
 
 /*
  * the kernel's page table.
@@ -170,9 +175,9 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+      continue;
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -272,7 +277,7 @@ freewalk(pagetable_t pagetable)
       freewalk((pagetable_t)child);
       pagetable[i] = 0;
     } else if(pte & PTE_V){
-      panic("freewalk: leaf");
+      // panic("freewalk: leaf");
     }
   }
   kfree((void*)pagetable);
@@ -427,5 +432,83 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return 0;
   } else {
     return -1;
+  }
+}
+
+int
+mmap_lazy_alloc(uint64 va, int scause)
+{
+  struct proc *p = myproc();
+  struct vma* v = p->vma;
+  while(v != 0){
+    if(va >= v->start && va < v->end){
+      break;
+    }
+    v = v->next;
+  }
+
+  if(v == 0) {
+    printf("mmap_lazy_alloc: invalid address\n");
+    return -1;
+  }
+  if(scause == 13 && !(v->prot & PTE_R)) {
+    printf("mmap_lazy_alloc: cannot read vma\n");
+    return -1;
+  }
+  if(scause == 15 && !(v->prot & PTE_W)) {
+    printf("mmap_lazy_alloc: cannot write vma\n");
+    return -1;
+  }
+
+  // load page from file
+  uint64 addr = PGROUNDDOWN(va);
+  char* mem = kalloc();
+  if (mem == 0) {
+    printf("mmap_lazy_alloc: kalloc failed\n");
+    return -1;
+  }
+
+  memset(mem, 0, PGSIZE);
+
+  if(mappages(p->pagetable, addr, PGSIZE, (uint64)mem, v->prot) != 0){
+    kfree(mem);
+    printf("mmap_lazy_alloc: map page failed\n");
+    return -1;
+  }
+
+  struct file *f = v->fd;
+  ilock(f->ip);
+  readi(f->ip, 0, (uint64)mem, v->offset + addr - v->start, PGSIZE);
+  iunlock(f->ip);
+  return 0;
+}
+
+void
+write_back(struct vma* v, uint64 addr, int n)
+{
+  if(!(v->prot & PTE_W) || (v->flags & MAP_PRIVATE)) // no need to writeback
+    return;
+
+  if((addr % PGSIZE) != 0){
+    panic("unmap: not aligned");
+  }
+
+  // printf("starting writeback: %p %d\n", addr, n);
+
+  struct file* f = v->fd;
+
+  int max_sz = ((MAXOPBLOCKS - 4) / 2) * BSIZE;
+  int i, written_bytes = 0;
+  for(i = 0; i < n; i += written_bytes){
+    int tmp_n = n - i;
+    if(tmp_n > max_sz){
+      tmp_n = max_sz;
+    }
+
+    begin_op();
+    ilock(f->ip);
+    written_bytes = writei(f->ip, 1, addr + i, v->offset + v->start - addr + i, tmp_n);
+    iunlock(f->ip);
+    end_op();
   }
 }
